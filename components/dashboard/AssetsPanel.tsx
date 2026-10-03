@@ -1,5 +1,6 @@
 "use client";
 
+import { Images } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { AssetList } from "@/components/dashboard/AssetList";
@@ -35,7 +36,8 @@ export function AssetsPanel({ items, hasProject, onFiles, onRemove, onRetry }: A
     <Panel
       title="Assets"
       description="Images & logos stored in Cloudinary"
-      icon={<ImageIcon className="h-[18px] w-[18px]" />}
+      icon={<Images />}
+      iconTone="violet"
       meta={
         <Badge tone={uploaded > 0 ? "primary" : "neutral"} mono>
           {uploaded}/{LIMITS.maxAssetsPerProject}

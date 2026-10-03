@@ -3,15 +3,18 @@
 import type { ReactNode } from "react";
 
 import { ProjectLinkField } from "@/components/dashboard/ProjectLinkField";
+import { FileCode2, FolderTree, FolderUp, Lock, LockOpen, ShieldCheck } from "lucide-react";
+
 import { Badge } from "@/components/ui/Badge";
+import { IconTile } from "@/components/ui/IconTile";
+import { Switch } from "@/components/ui/Switch";
+import { Tilt } from "@/components/ui/Tilt";
 import { Dropzone } from "@/components/ui/Dropzone";
 import {
   AlertIcon,
   ArchiveIcon,
   CheckIcon,
   FileCodeIcon,
-  FolderIcon,
-  ShieldIcon,
   SpinnerIcon,
   UploadIcon,
 } from "@/components/ui/icons";
@@ -30,6 +33,8 @@ interface SourcePanelProps {
   /** Chosen link (site-url/<slug>); empty means a random one. */
   slug: string;
   onSlugChange: (slug: string) => void;
+  /** Only for the private account: whether the new project goes into the locked vault. */
+  lock?: { value: boolean; onChange: (value: boolean) => void };
 }
 
 export function SourcePanel(props: SourcePanelProps) {
@@ -40,7 +45,7 @@ export function SourcePanel(props: SourcePanelProps) {
     <Panel
       title="Source"
       description="A single HTML file or a ZIP archive of a static site"
-      icon={<FolderIcon className="h-[18px] w-[18px]" />}
+      icon={<FolderUp />}
       meta={busy ? <Badge tone="primary" dot>Deploying</Badge> : undefined}
     >
       {busy ? <DeployProgress state={state} /> : <SourcePicker {...props} />}
@@ -48,7 +53,7 @@ export function SourcePanel(props: SourcePanelProps) {
   );
 }
 
-function SourcePicker({ state, onFile, slug, onSlugChange }: SourcePanelProps) {
+function SourcePicker({ state, onFile, slug, onSlugChange, lock }: SourcePanelProps) {
   const link = useSlugAvailability(slug);
   const blocked = link.status === "invalid" || link.status === "taken" || link.status === "checking";
 
@@ -74,6 +79,27 @@ function SourcePicker({ state, onFile, slug, onSlugChange }: SourcePanelProps) {
 
       <ProjectLinkField value={slug} onChange={onSlugChange} status={link.status} reason={link.reason} />
 
+      {lock && (
+        <div
+          className={`flex items-center gap-3.5 rounded-2xl border px-4 py-3 transition-colors duration-300 ${
+            lock.value ? "border-violet-400/40 bg-violet-500/[0.07]" : "border-border bg-bg-subtle"
+          }`}
+        >
+          <IconTile tone={lock.value ? "violet" : "slate"} size="sm">
+            {lock.value ? <Lock /> : <LockOpen />}
+          </IconTile>
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-fg">Lock this project</p>
+            <p className="text-xs text-fg-subtle">
+              {lock.value
+                ? "Only your private login will see it. Hidden from the admin account."
+                : "Visible to both logins."}
+            </p>
+          </div>
+          <Switch checked={lock.value} onChange={lock.onChange} label="Lock this project" />
+        </div>
+      )}
+
       <Dropzone
         title={blocked && link.status !== "checking" ? "Fix the project link first" : "Drop HTML or ZIP here"}
         buttonLabel="Choose File"
@@ -93,13 +119,13 @@ function SourcePicker({ state, onFile, slug, onSlugChange }: SourcePanelProps) {
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Feature icon={<FileCodeIcon className="h-4 w-4" />} title="index.html entry">
+        <Feature icon={<FileCode2 />} tone="sky" title="index.html entry">
           ZIPs need an index.html. A wrapping root folder is detected automatically.
         </Feature>
-        <Feature icon={<FolderIcon className="h-4 w-4" />} title="Paths preserved">
+        <Feature icon={<FolderTree />} tone="violet" title="Paths preserved">
           Folder structure and relative links like ./assets/logo.png keep working.
         </Feature>
-        <Feature icon={<ShieldIcon className="h-4 w-4" />} title="Isolated & static">
+        <Feature icon={<ShieldCheck />} tone="emerald" title="Isolated & static">
           Only static files are published. Pages run in a sandbox.
         </Feature>
       </div>
@@ -107,15 +133,25 @@ function SourcePicker({ state, onFile, slug, onSlugChange }: SourcePanelProps) {
   );
 }
 
-function Feature({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+function Feature({
+  icon,
+  tone,
+  title,
+  children,
+}: {
+  icon: ReactNode;
+  tone: "sky" | "violet" | "emerald";
+  title: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="rounded-xl border border-border bg-bg-subtle p-3.5">
-      <div className="flex items-center gap-2 text-fg">
-        <span className="text-primary">{icon}</span>
-        <p className="text-[13px] font-semibold">{title}</p>
-      </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-fg-subtle">{children}</p>
-    </div>
+    <Tilt max={8} className="depth-1 rounded-2xl border border-border bg-surface/70 p-4">
+      <IconTile tone={tone} size="sm">
+        {icon}
+      </IconTile>
+      <p className="mt-3 text-[13px] font-semibold text-fg">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-fg-subtle">{children}</p>
+    </Tilt>
   );
 }
 

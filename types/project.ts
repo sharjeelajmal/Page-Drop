@@ -43,6 +43,7 @@ export interface ProjectDTO {
   error?: string;
   assets: AssetDTO[];
   files: ProjectFileDTO[];
+  locked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,9 +62,12 @@ export interface ProjectSummaryDTO {
   assetCount: number;
   totalBytes: number;
   thumbnailUrl?: string;
+  locked: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ViewerRole = "admin" | "private";
 
 export interface ApiErrorBody {
   error: { code: string; message: string };

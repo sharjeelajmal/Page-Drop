@@ -56,11 +56,17 @@ const projectSchema = new Schema(
     totalBytes: { type: Number, default: 0 },
     /** Bumped on every redeploy; files live in site/ (0) or site-r<n>/. */
     revision: { type: Number, default: 0 },
+    /** Locked projects are only visible to the private account, never to admin. */
+    locked: { type: Boolean, default: false },
+    createdBy: { type: String, enum: ["admin", "private"], default: "admin" },
     warnings: { type: [String], default: [] },
     error: String,
   },
   { timestamps: true },
 );
+
+// Listing filters on `locked` and sorts by newest first.
+projectSchema.index({ locked: 1, createdAt: -1 });
 
 export type ProjectFileRecord = InferSchemaType<typeof projectFileSchema>;
 export type AssetRecord = InferSchemaType<typeof assetSchema> & { _id: unknown; createdAt: Date };

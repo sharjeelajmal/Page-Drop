@@ -2,17 +2,30 @@ import "server-only";
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
-import { getAdminCredentials, getAuthSecret } from "@/lib/env";
+import { getAdminCredentials, getAuthSecret, getPrivateCredentials } from "@/lib/env";
 
 /**
- * Stateless admin session: a signed cookie "<payload>.<signature>" where the
- * payload holds the username and expiry. Nothing is stored server-side.
+ * Stateless sessions: a signed cookie "<payload>.<signature>" whose payload
+ * holds the account role, username and expiry. Nothing is stored
+ * server-side. Two accounts exist:
+ *
+ * - admin   (ADMIN_USERNAME / ADMIN_PASSWORD): never sees locked projects.
+ * - private (PRIVATE_USERNAME / PRIVATE_PASSWORD, optional): sees everything
+ *   and can lock/unlock projects.
  */
 
 export const SESSION_COOKIE = "pagedrop_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
+export type Role = "admin" | "private";
+
+export interface Session {
+  role: Role;
+  username: string;
+}
+
 interface SessionPayload {
+  role: Role;
   sub: string;
   exp: number; // unix seconds
 }
@@ -20,39 +33,67 @@ interface SessionPayload {
 const sign = (data: string) => createHmac("sha256", getAuthSecret()).update(data).digest();
 const sha256 = (value: string) => createHash("sha256").update(value).digest();
 
-export function createSessionToken(): string {
-  const { username } = getAdminCredentials();
+/** Username currently configured for a role (null when the role is disabled). */
+function usernameFor(role: Role): string | null {
+  if (role === "admin") return getAdminCredentials().username;
+  return getPrivateCredentials()?.username ?? null;
+}
+
+export function createSessionToken(session: Session): string {
   const payload: SessionPayload = {
-    sub: username,
+    role: session.role,
+    sub: session.username,
     exp: Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS,
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${encoded}.${sign(encoded).toString("base64url")}`;
 }
 
-/** True for an untampered, unexpired token issued to the current admin user. */
-export function verifySessionToken(token: string | undefined): boolean {
-  if (!token) return false;
+/**
+ * Returns the session for an untampered, unexpired token whose username still
+ * matches the account configured for its role (so changing a username or
+ * removing the private account signs those sessions out).
+ */
+export function readSessionToken(token: string | undefined): Session | null {
+  if (!token || token.length > 1024) return null;
   try {
-    const [encoded, signature] = token.split(".");
-    if (!encoded || !signature) return false;
+    const [encoded, signature, extra] = token.split(".");
+    if (!encoded || !signature || extra !== undefined) return null;
 
     const expected = sign(encoded);
     const actual = Buffer.from(signature, "base64url");
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return false;
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
 
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString()) as SessionPayload;
-    return payload.exp > Date.now() / 1000 && payload.sub === getAdminCredentials().username;
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString()) as Partial<SessionPayload>;
+    if (payload.role !== "admin" && payload.role !== "private") return null;
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return null;
+    if (typeof payload.sub !== "string" || payload.sub !== usernameFor(payload.role)) return null;
+    return { role: payload.role, username: payload.sub };
   } catch {
     // Malformed token or missing credentials in .env: treat as signed out.
-    return false;
+    return null;
   }
 }
 
-/** Constant-time comparison of submitted credentials with the ones in .env. */
-export function checkCredentials(username: string, password: string): boolean {
+export const verifySessionToken = (token: string | undefined) => readSessionToken(token) !== null;
+
+/**
+ * Constant-time check of submitted credentials against both accounts. Both
+ * comparisons always run so timing does not reveal which account exists.
+ */
+export function checkCredentials(username: string, password: string): Session | null {
+  const user = sha256(username);
+  const pass = sha256(password);
+
   const admin = getAdminCredentials();
-  const userOk = timingSafeEqual(sha256(username), sha256(admin.username));
-  const passOk = timingSafeEqual(sha256(password), sha256(admin.password));
-  return userOk && passOk;
+  const adminOk = timingSafeEqual(user, sha256(admin.username)) && timingSafeEqual(pass, sha256(admin.password));
+
+  const priv = getPrivateCredentials();
+  const privateOk = priv
+    ? timingSafeEqual(user, sha256(priv.username)) && timingSafeEqual(pass, sha256(priv.password))
+    : false;
+
+  if (adminOk) return { role: "admin", username: admin.username };
+  if (privateOk && priv) return { role: "private", username: priv.username };
+  return null;
 }

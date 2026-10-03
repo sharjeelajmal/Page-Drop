@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { requireAdmin } from "@/lib/auth/guard";
+import { requireSession } from "@/lib/auth/guard";
 import { assertSameOrigin, handleApiError } from "@/lib/http";
 import { removeAsset } from "@/lib/projects/service";
 
@@ -12,9 +12,9 @@ export async function DELETE(
 ) {
   try {
     assertSameOrigin(request);
-    requireAdmin(request);
+    const session = requireSession(request);
     const { projectId, assetId } = await ctx.params;
-    await removeAsset(projectId, assetId);
+    await removeAsset(projectId, assetId, session);
     return new Response(null, { status: 204 });
   } catch (error) {
     return handleApiError(error);

@@ -4,11 +4,13 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { AssetsPanel } from "@/components/dashboard/AssetsPanel";
 import { DeploymentPanel } from "@/components/dashboard/DeploymentPanel";
-import { PipelineSteps, type PipelineStep } from "@/components/dashboard/PipelineSteps";
+import { DeployHero } from "@/components/dashboard/DeployHero";
+import type { PipelineStep } from "@/components/dashboard/PipelineSteps";
 import { SourcePanel } from "@/components/dashboard/SourcePanel";
 import { useProjectUpload, type ProjectUploadState } from "@/hooks/useProjectUpload";
 import { AssetUploadManager, type AssetItem } from "@/lib/client/asset-uploads";
 import { finalizeSlug } from "@/lib/slug";
+import type { ViewerRole } from "@/types/project";
 
 const EMPTY_ASSETS: AssetItem[] = [];
 const getServerAssets = () => EMPTY_ASSETS;
@@ -35,9 +37,11 @@ function pipelineSteps(state: ProjectUploadState, uploadedAssets: number): Pipel
   ];
 }
 
-export function Dashboard() {
+export function Dashboard({ role }: { role: ViewerRole }) {
   const { state, upload, restore, reset } = useProjectUpload();
   const [slug, setSlug] = useState("");
+  // Private account: new projects go into the locked vault unless switched off.
+  const [lockNew, setLockNew] = useState(true);
   const [assets] = useState(() => new AssetUploadManager());
   const assetItems = useSyncExternalStore(assets.subscribe, assets.getSnapshot, getServerAssets);
 
@@ -51,7 +55,10 @@ export function Dashboard() {
   }, [restore, assets]);
 
   const handleProjectFile = async (file: File) => {
-    const project = await upload(file, finalizeSlug(slug) || undefined);
+    const project = await upload(file, {
+      slug: finalizeSlug(slug) || undefined,
+      locked: role === "private" ? lockNew : undefined,
+    });
     if (!project) return;
     setSlug("");
     setProjectParam(project.projectId);
@@ -68,23 +75,8 @@ export function Dashboard() {
   const uploadedAssets = assetItems.filter((item) => item.status === "uploaded").length;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-            {project ? "Deployment ready" : "New deployment"}
-          </p>
-          <h1 className="text-3xl font-semibold tracking-[-0.025em] text-fg sm:text-4xl">
-            {project ? "Your site is live" : "Deploy a static site"}
-          </h1>
-          <p className="mt-2 max-w-xl text-[15px] text-fg-muted">
-            Drop an HTML file or a ZIP, attach images, and share a public URL in seconds.
-          </p>
-        </div>
-        <div className="w-fit rounded-full border border-border bg-surface/80 px-4 py-2.5 shadow-card backdrop-blur">
-          <PipelineSteps steps={pipelineSteps(state, uploadedAssets)} />
-        </div>
-      </div>
+    <div className="space-y-12">
+      <DeployHero ready={project !== null} steps={pipelineSteps(state, uploadedAssets)} />
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
         {project ? (
@@ -95,10 +87,11 @@ export function Dashboard() {
             onFile={handleProjectFile}
             slug={slug}
             onSlugChange={setSlug}
+            lock={role === "private" ? { value: lockNew, onChange: setLockNew } : undefined}
           />
         )}
 
-        <div className="lg:sticky lg:top-20">
+        <div className="lg:sticky lg:top-24">
           <AssetsPanel
             items={assetItems}
             hasProject={project !== null}

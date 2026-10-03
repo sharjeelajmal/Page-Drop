@@ -54,6 +54,22 @@ export function getAdminCredentials() {
 }
 
 /**
+ * Optional second login (PRIVATE_USERNAME / PRIVATE_PASSWORD) that can see
+ * and manage locked projects. Returns null when it is not configured or would
+ * clash with the admin username.
+ */
+export function getPrivateCredentials(): { username: string; password: string } | null {
+  const username = process.env.PRIVATE_USERNAME?.trim();
+  const password = process.env.PRIVATE_PASSWORD?.trim();
+  if (!username || !password) return null;
+  if (username === process.env.ADMIN_USERNAME?.trim()) {
+    console.warn("[env] PRIVATE_USERNAME must differ from ADMIN_USERNAME; the private login is disabled.");
+    return null;
+  }
+  return { username, password };
+}
+
+/**
  * Key for signing session cookies. AUTH_SECRET is recommended; without it a
  * key is derived from the admin credentials, so changing the password still
  * signs everyone out.

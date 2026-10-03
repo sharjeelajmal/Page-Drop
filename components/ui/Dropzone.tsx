@@ -92,14 +92,13 @@ export function Dropzone({
     >
       <div
         className={[
-          "flex items-center justify-center rounded-xl border bg-surface shadow-card transition-all duration-200",
-          large ? "h-14 w-14" : "h-10 w-10",
-          isDragging
-            ? "-translate-y-1 border-primary/40 text-primary"
-            : "border-border text-fg-muted group-hover:-translate-y-0.5 group-hover:border-primary/30 group-hover:text-primary",
+          "bg-brand relative flex items-center justify-center overflow-hidden text-white shadow-[0_14px_30px_-12px_rgba(59,91,255,0.9),inset_0_1px_0_rgba(255,255,255,0.4),inset_0_-3px_6px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          large ? "h-16 w-16 rounded-2xl" : "h-11 w-11 rounded-xl",
+          isDragging ? "-translate-y-2 scale-110 rotate-[-6deg]" : "group-hover:-translate-y-1 group-hover:rotate-[-4deg]",
         ].join(" ")}
       >
-        {icon}
+        <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/30 to-transparent" />
+        <span className="relative">{icon}</span>
       </div>
 
       <div className="space-y-1">

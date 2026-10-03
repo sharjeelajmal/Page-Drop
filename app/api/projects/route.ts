@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { requireAdmin } from "@/lib/auth/guard";
+import { requireSession } from "@/lib/auth/guard";
 import { LIMITS } from "@/lib/config";
 import { assertSameOrigin, handleApiError, readUploadedFile, requestOrigin } from "@/lib/http";
 import { createProject, listProjects } from "@/lib/projects/service";
@@ -8,12 +8,13 @@ import { createProject, listProjects } from "@/lib/projects/service";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-/** All projects, newest first. */
+/** Projects visible to the signed-in account, newest first. `?view=locked` lists the private vault. */
 export async function GET(request: NextRequest) {
   try {
-    requireAdmin(request);
-    const projects = await listProjects(requestOrigin(request));
-    return Response.json({ projects }, { headers: { "Cache-Control": "no-store" } });
+    const session = requireSession(request);
+    const view = request.nextUrl.searchParams.get("view") === "locked" ? "locked" : "active";
+    const projects = await listProjects(requestOrigin(request), session, view);
+    return Response.json({ projects }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return handleApiError(error);
   }
@@ -23,10 +24,14 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
-    requireAdmin(request);
+    const session = requireSession(request);
     const { file, form } = await readUploadedFile(request, "file", LIMITS.maxZipBytes);
     const slug = form.get("slug");
-    const project = await createProject(file, requestOrigin(request), typeof slug === "string" ? slug : undefined);
+    const locked = form.get("locked");
+    const project = await createProject(file, requestOrigin(request), session, {
+      slug: typeof slug === "string" ? slug : undefined,
+      locked: locked === "false" ? false : locked === "true" ? true : undefined,
+    });
     return Response.json({ project }, { status: 201 });
   } catch (error) {
     return handleApiError(error);

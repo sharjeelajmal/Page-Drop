@@ -1,9 +1,9 @@
 "use client";
 
+import { ExternalLink, Lock, LockOpen, PencilLine, RefreshCw, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { CopyButton } from "@/components/ui/CopyButton";
-import { ExternalIcon, PencilIcon, RetryIcon, TrashIcon } from "@/components/ui/icons";
 import type { ProjectSummaryDTO } from "@/types/project";
 
 export interface ProjectHandlers {
@@ -11,9 +11,11 @@ export interface ProjectHandlers {
   onRename: (project: ProjectSummaryDTO) => void;
   onRedeploy: (project: ProjectSummaryDTO) => void;
   onDelete: (project: ProjectSummaryDTO) => void;
+  /** Present only for the private account. */
+  onToggleLock?: (project: ProjectSummaryDTO) => void;
 }
 
-/** Icon toolbar: open, copy URL, rename, redeploy, delete. */
+/** Icon toolbar: open, copy URL, rename, redeploy, (un)lock, delete. */
 export function ProjectActions({
   project,
   handlers,
@@ -24,17 +26,26 @@ export function ProjectActions({
   return (
     <div className="flex items-center">
       <IconLink href={project.publicUrl} label="Open page">
-        <ExternalIcon className="h-4 w-4" />
+        <ExternalLink className="h-4 w-4" />
       </IconLink>
       <CopyButton value={project.publicUrl} label="Copy URL" />
       <IconButton label="Rename" onClick={() => handlers.onRename(project)}>
-        <PencilIcon className="h-4 w-4" />
+        <PencilLine className="h-4 w-4" />
       </IconButton>
       <IconButton label="Redeploy with new files" onClick={() => handlers.onRedeploy(project)}>
-        <RetryIcon className="h-4 w-4" />
+        <RefreshCw className="h-4 w-4" />
       </IconButton>
+      {handlers.onToggleLock && (
+        <IconButton
+          label={project.locked ? "Unlock (visible to admin)" : "Lock (hide from admin)"}
+          onClick={() => handlers.onToggleLock?.(project)}
+          accent
+        >
+          {project.locked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+        </IconButton>
+      )}
       <IconButton label="Delete" danger onClick={() => handlers.onDelete(project)}>
-        <TrashIcon className="h-4 w-4" />
+        <Trash2 className="h-4 w-4" />
       </IconButton>
     </div>
   );
@@ -46,11 +57,13 @@ const iconClasses =
 function IconButton({
   label,
   danger,
+  accent,
   onClick,
   children,
 }: {
   label: string;
   danger?: boolean;
+  accent?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -60,7 +73,9 @@ function IconButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`${iconClasses} ${danger ? "hover:bg-danger-soft hover:text-danger" : ""}`}
+      className={`${iconClasses} ${danger ? "hover:bg-danger-soft hover:text-danger" : ""} ${
+        accent ? "hover:bg-violet-500/10 hover:text-violet-600 dark:hover:text-violet-300" : ""
+      }`}
     >
       {children}
     </button>

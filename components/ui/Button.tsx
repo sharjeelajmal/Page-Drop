@@ -8,8 +8,8 @@ const base =
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-primary text-primary-fg shadow-[0_1px_0_rgb(255_255_255/0.15)_inset,0_1px_2px_rgb(0_0_0/0.15)] hover:bg-primary-hover",
-  secondary: "border border-border bg-surface text-fg shadow-card hover:border-border-strong hover:bg-surface-2",
+    "sheen bg-brand text-white shadow-[0_1px_0_rgb(255_255_255/0.25)_inset,0_10px_24px_-10px_rgb(59_91_255/0.8)] hover:-translate-y-px hover:shadow-[0_1px_0_rgb(255_255_255/0.25)_inset,0_14px_30px_-10px_rgb(59_91_255/0.9)] hover:brightness-110",
+  secondary: "depth-1 border border-border bg-surface text-fg hover:-translate-y-px hover:border-border-strong hover:bg-surface-2",
   ghost: "text-fg-muted hover:bg-surface-2 hover:text-fg",
   danger: "text-fg-muted hover:bg-danger-soft hover:text-danger",
 };

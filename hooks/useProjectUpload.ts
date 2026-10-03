@@ -16,8 +16,14 @@ export type ProjectUploadState =
 export function useProjectUpload() {
   const [state, setState] = useState<ProjectUploadState>({ phase: "idle" });
 
-  /** `slug` is the optional link chosen by the user (site-url/<slug>). */
-  const upload = useCallback(async (file: File, slug?: string): Promise<ProjectDTO | null> => {
+  /**
+   * `slug` is the optional link chosen by the user (site-url/<slug>);
+   * `locked` is only honoured for the private account.
+   */
+  const upload = useCallback(async (
+    file: File,
+    options: { slug?: string; locked?: boolean } = {},
+  ): Promise<ProjectDTO | null> => {
     const fileName = file.name;
     const fileSize = file.size;
     const invalid = validateProjectFile(file);
@@ -37,7 +43,10 @@ export function useProjectUpload() {
               ? { phase: "processing", fileName, fileSize }
               : { phase: "uploading", fileName, fileSize, progress },
           ),
-        slug ? { slug } : {},
+        {
+          ...(options.slug ? { slug: options.slug } : {}),
+          ...(options.locked !== undefined ? { locked: String(options.locked) } : {}),
+        },
       );
       setState({ phase: "ready", project });
       return project;

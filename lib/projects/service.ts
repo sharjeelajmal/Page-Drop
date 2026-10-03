@@ -19,15 +19,32 @@ import { generateProjectId, generateSlug, isValidObjectId, isValidProjectId } fr
 import { Project, type AssetRecord, type ProjectFileRecord } from "@/lib/models/Project";
 import { prepareProjectUpload, type PreparedProject } from "@/lib/projects/prepare";
 import { serializeAsset, serializeProject } from "@/lib/projects/serialize";
+import { invalidateSite } from "@/lib/publish/cache";
 import { CUSTOM_SLUG_HINT, RESERVED_SLUG_HINT, isReservedSlug, isValidCustomSlug } from "@/lib/slug";
 import { buildPublicUrl } from "@/lib/urls";
-import type { AssetDTO, CloudinaryResourceType, ProjectDTO, ProjectSummaryDTO } from "@/types/project";
+import type { AssetDTO, CloudinaryResourceType, ProjectDTO, ProjectSummaryDTO, ViewerRole } from "@/types/project";
 
 const projectFolder = (projectId: string) => `${CLOUDINARY_ROOT_FOLDER}/${projectId}`;
 const siteFolder = (projectId: string, revision: number) =>
   `${projectFolder(projectId)}/${revision > 0 ? `site-r${revision}` : "site"}`;
 
 const MAX_NAME_LENGTH = 120;
+
+/** Who is asking. Admins never see (or touch) locked projects. */
+export interface Viewer {
+  role: ViewerRole;
+}
+
+/**
+ * Mongo filter limiting a query to the projects a viewer may see. Every read
+ * and write below goes through it, so a locked project is a 404 for admin
+ * even if its id is known.
+ */
+function visibleTo(viewer: Viewer): Record<string, unknown> {
+  return viewer.role === "private" ? {} : { locked: { $ne: true } };
+}
+
+const projectNotFound = () => notFound("Project not found.");
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -40,15 +57,19 @@ const MAX_NAME_LENGTH = 120;
 export async function createProject(
   file: File,
   requestOrigin: string,
-  customSlug?: string,
+  viewer: Viewer,
+  options: { slug?: string; locked?: boolean } = {},
 ): Promise<ProjectDTO> {
   // Validate the chosen link before doing any expensive work.
-  const slug = customSlug?.trim() ? normalizeCustomSlug(customSlug) : undefined;
+  const slug = options.slug?.trim() ? normalizeCustomSlug(options.slug) : undefined;
+  // Projects made by the private account are locked unless it opts out;
+  // admin can never create locked projects.
+  const locked = viewer.role === "private" ? options.locked !== false : false;
   const prepared = await prepareProjectUpload(file);
   assertCloudinaryConfigured();
   await connectToDatabase();
 
-  const project = await insertProcessingProject(prepared, requestOrigin, slug);
+  const project = await insertProcessingProject(prepared, requestOrigin, slug, { locked, createdBy: viewer.role });
 
   try {
     const files = await uploadSiteFiles(siteFolder(project.projectId, 0), prepared.files);
@@ -58,6 +79,7 @@ export async function createProject(
       totalBytes: files.reduce((sum, f) => sum + f.bytes, 0),
     });
     await project.save();
+    invalidateSite(project.slug);
     return serializeProject(project.toObject(), requestOrigin);
   } catch (error) {
     const message = error instanceof AppError ? error.message : "Processing failed.";
@@ -69,16 +91,25 @@ export async function createProject(
   }
 }
 
-export async function getProject(projectId: string, requestOrigin: string): Promise<ProjectDTO> {
-  if (!isValidProjectId(projectId)) throw notFound("Project not found.");
+export async function getProject(projectId: string, requestOrigin: string, viewer: Viewer): Promise<ProjectDTO> {
+  if (!isValidProjectId(projectId)) throw projectNotFound();
   await connectToDatabase();
-  const project = await Project.findOne({ projectId }).lean();
-  if (!project) throw notFound("Project not found.");
+  const project = await Project.findOne({ projectId, ...visibleTo(viewer) }).lean();
+  if (!project) throw projectNotFound();
   return serializeProject(project, requestOrigin);
 }
 
-export async function listProjects(requestOrigin: string): Promise<ProjectSummaryDTO[]> {
+/**
+ * Projects for the list page. `view: "locked"` (private account only) lists
+ * the locked vault; otherwise only unlocked projects are returned.
+ */
+export async function listProjects(
+  requestOrigin: string,
+  viewer: Viewer,
+  view: "active" | "locked" = "active",
+): Promise<ProjectSummaryDTO[]> {
   await connectToDatabase();
+  const match = viewer.role === "private" && view === "locked" ? { locked: true } : { locked: { $ne: true } };
   const rows = await Project.aggregate<{
     projectId: string;
     slug: string;
@@ -92,9 +123,11 @@ export async function listProjects(requestOrigin: string): Promise<ProjectSummar
     assetCount: number;
     assetThumb?: string;
     fileThumb?: string;
+    locked?: boolean;
     createdAt: Date;
     updatedAt: Date;
   }>([
+    { $match: match },
     { $sort: { createdAt: -1 } },
     { $limit: 1000 },
     {
@@ -107,6 +140,7 @@ export async function listProjects(requestOrigin: string): Promise<ProjectSummar
         type: 1,
         status: 1,
         totalBytes: 1,
+        locked: 1,
         createdAt: 1,
         updatedAt: 1,
         fileCount: { $size: "$files" },
@@ -143,32 +177,56 @@ export async function listProjects(requestOrigin: string): Promise<ProjectSummar
     assetCount: row.assetCount,
     totalBytes: row.totalBytes ?? 0,
     thumbnailUrl: row.assetThumb ?? row.fileThumb ?? undefined,
+    locked: row.locked === true,
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
   }));
 }
 
-export async function renameProject(projectId: string, rawName: unknown, requestOrigin: string): Promise<ProjectDTO> {
-  if (!isValidProjectId(projectId)) throw notFound("Project not found.");
-  const name = typeof rawName === "string" ? rawName.replace(/\s+/g, " ").trim() : "";
-  if (!name || name.length > MAX_NAME_LENGTH) {
-    throw new AppError(400, "invalid_name", `Name must be 1–${MAX_NAME_LENGTH} characters.`);
+/** Rename and/or lock a project. Only the private account may change `locked`. */
+export async function updateProject(
+  projectId: string,
+  changes: { name?: unknown; locked?: unknown },
+  requestOrigin: string,
+  viewer: Viewer,
+): Promise<ProjectDTO> {
+  if (!isValidProjectId(projectId)) throw projectNotFound();
+  const update: { name?: string; locked?: boolean } = {};
+
+  if (changes.name !== undefined) {
+    const name = typeof changes.name === "string" ? changes.name.replace(/\s+/g, " ").trim() : "";
+    if (!name || name.length > MAX_NAME_LENGTH) {
+      throw new AppError(400, "invalid_name", `Name must be 1–${MAX_NAME_LENGTH} characters.`);
+    }
+    update.name = name;
   }
+  if (changes.locked !== undefined) {
+    if (viewer.role !== "private") throw new AppError(403, "forbidden", "This account cannot lock projects.");
+    if (typeof changes.locked !== "boolean") throw new AppError(400, "invalid_request", "`locked` must be true or false.");
+    update.locked = changes.locked;
+  }
+  if (Object.keys(update).length === 0) throw new AppError(400, "invalid_request", "Nothing to update.");
+
   await connectToDatabase();
-  const project = await Project.findOneAndUpdate({ projectId }, { $set: { name } }, { new: true }).lean();
-  if (!project) throw notFound("Project not found.");
+  const project = await Project.findOneAndUpdate(
+    { projectId, ...visibleTo(viewer) },
+    { $set: update },
+    { new: true },
+  ).lean();
+  if (!project) throw projectNotFound();
   return serializeProject(project, requestOrigin);
 }
 
 /** Removes the project's Cloudinary folder (site files + assets) and its metadata. */
-export async function deleteProject(projectId: string): Promise<void> {
-  if (!isValidProjectId(projectId)) throw notFound("Project not found.");
+export async function deleteProject(projectId: string, viewer: Viewer): Promise<void> {
+  if (!isValidProjectId(projectId)) throw projectNotFound();
   assertCloudinaryConfigured();
   await connectToDatabase();
-  const project = await Project.findOne({ projectId }, { _id: 1 }).lean();
-  if (!project) throw notFound("Project not found.");
+  const project = await Project.findOne({ projectId, ...visibleTo(viewer) }, { slug: 1 }).lean();
+  if (!project) throw projectNotFound();
   await deleteFolder(projectFolder(projectId));
   await Project.deleteOne({ projectId });
+  invalidateSite(project.slug);
 }
 
 /**
@@ -176,14 +234,19 @@ export async function deleteProject(projectId: string): Promise<void> {
  * and assets. New files go to a fresh revision folder and are swapped in only
  * after every upload succeeded, so the live page never serves a half-update.
  */
-export async function redeployProject(projectId: string, file: File, requestOrigin: string): Promise<ProjectDTO> {
-  if (!isValidProjectId(projectId)) throw notFound("Project not found.");
+export async function redeployProject(
+  projectId: string,
+  file: File,
+  requestOrigin: string,
+  viewer: Viewer,
+): Promise<ProjectDTO> {
+  if (!isValidProjectId(projectId)) throw projectNotFound();
+  await connectToDatabase();
+  // Check access before reading/processing the upload.
+  const current = await Project.findOne({ projectId, ...visibleTo(viewer) }, { status: 1, revision: 1 }).lean();
+  if (!current) throw projectNotFound();
   const prepared = await prepareProjectUpload(file);
   assertCloudinaryConfigured();
-  await connectToDatabase();
-
-  const current = await Project.findOne({ projectId }, { status: 1, revision: 1 }).lean();
-  if (!current) throw notFound("Project not found.");
   if (current.status === "processing") {
     throw new AppError(409, "project_busy", "This project is still being processed. Try again shortly.");
   }
@@ -201,7 +264,7 @@ export async function redeployProject(projectId: string, file: File, requestOrig
   }
 
   const updated = await Project.findOneAndUpdate(
-    { projectId },
+    { projectId, ...visibleTo(viewer) },
     {
       $set: {
         status: "ready",
@@ -221,8 +284,9 @@ export async function redeployProject(projectId: string, file: File, requestOrig
   if (!updated) {
     // Deleted while we were uploading.
     await deleteFolder(folder);
-    throw notFound("Project not found.");
+    throw projectNotFound();
   }
+  invalidateSite(updated.slug);
   await deleteFolder(siteFolder(projectId, previousRevision));
   return serializeProject(updated, requestOrigin);
 }
@@ -247,7 +311,12 @@ export async function checkSlugAvailability(raw: string): Promise<{ available: b
   return exists ? { available: false, reason: "Already used by another project." } : { available: true };
 }
 
-async function insertProcessingProject(prepared: PreparedProject, requestOrigin: string, customSlug?: string) {
+async function insertProcessingProject(
+  prepared: PreparedProject,
+  requestOrigin: string,
+  customSlug: string | undefined,
+  owner: { locked: boolean; createdBy: ViewerRole },
+) {
   if (customSlug && (await Project.exists({ slug: customSlug }))) throw slugTaken(customSlug);
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -264,6 +333,8 @@ async function insertProcessingProject(prepared: PreparedProject, requestOrigin:
         entryFile: prepared.entryFile,
         publicUrl: buildPublicUrl(slug, requestOrigin),
         warnings: prepared.warnings,
+        locked: owner.locked,
+        createdBy: owner.createdBy,
       });
     } catch (error) {
       const duplicate = error as { code?: number; keyPattern?: Record<string, unknown> };
@@ -339,8 +410,8 @@ const ASSET_MIME_TYPES = ["", "application/octet-stream"];
  * Uploads an image/logo for a project. Uploading a file with the same name
  * again replaces the previous version.
  */
-export async function addAsset(projectId: string, file: File): Promise<AssetDTO> {
-  if (!isValidProjectId(projectId)) throw notFound("Project not found.");
+export async function addAsset(projectId: string, file: File, viewer: Viewer): Promise<AssetDTO> {
+  if (!isValidProjectId(projectId)) throw projectNotFound();
 
   const originalName = cleanUploadedFileName(file.name);
   const extension = getExtension(originalName);
@@ -366,8 +437,8 @@ export async function addAsset(projectId: string, file: File): Promise<AssetDTO>
   assertCloudinaryConfigured();
   await connectToDatabase();
 
-  const project = await Project.findOne({ projectId }, { status: 1, assets: 1 }).lean();
-  if (!project) throw notFound("Project not found.");
+  const project = await Project.findOne({ projectId, ...visibleTo(viewer) }, { slug: 1, status: 1, assets: 1 }).lean();
+  if (!project) throw projectNotFound();
   if (project.status !== "ready") {
     throw new AppError(409, "project_not_ready", "Assets can only be added to a published project.");
   }
@@ -416,17 +487,21 @@ export async function addAsset(projectId: string, file: File): Promise<AssetDTO>
     }
   }
 
+  invalidateSite(project.slug);
   const saved = await findAssetByName(projectId, nameKey);
   if (!saved) throw new AppError(500, "asset_save_failed", "The asset could not be saved.");
   return serializeAsset(saved);
 }
 
-export async function removeAsset(projectId: string, assetId: string): Promise<void> {
+export async function removeAsset(projectId: string, assetId: string, viewer: Viewer): Promise<void> {
   if (!isValidProjectId(projectId) || !isValidObjectId(assetId)) throw notFound("Asset not found.");
   assertCloudinaryConfigured();
   await connectToDatabase();
 
-  const project = await Project.findOne({ projectId, "assets._id": assetId }, { "assets.$": 1 }).lean();
+  const project = await Project.findOne(
+    { projectId, "assets._id": assetId, ...visibleTo(viewer) },
+    { slug: 1, "assets.$": 1 },
+  ).lean();
   const asset = (project?.assets as AssetRecord[] | undefined)?.[0];
   if (!asset) throw notFound("Asset not found.");
 
@@ -437,6 +512,7 @@ export async function removeAsset(projectId: string, assetId: string): Promise<v
     throw new AppError(502, "storage_delete_failed", "Could not delete the asset from Cloudinary.");
   }
   await Project.updateOne({ projectId }, { $pull: { assets: { _id: assetId } } });
+  invalidateSite(project?.slug);
 }
 
 async function findAssetByName(projectId: string, nameKey: string): Promise<AssetRecord | undefined> {

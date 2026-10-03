@@ -15,6 +15,7 @@ npm run dev
 | `MONGODB_URI` | yes | Project metadata and Cloudinary URLs. No file contents are stored here. |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | yes | File storage. Used only on the server. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | yes | Dashboard login at `/login`. Change them in `.env` and restart the server. |
+| `PRIVATE_USERNAME`, `PRIVATE_PASSWORD` | no | Second login that also sees **locked** projects and can lock/unlock them. The admin login never sees locked projects. |
 | `AUTH_SECRET` | recommended | Long random string that signs login sessions. Changing it signs everyone out. |
 | `NEXT_PUBLIC_APP_URL` | no | Fixed base URL for generated links. Leave empty to use the domain the app is opened on, so the same config works on localhost and in production. |
 
@@ -41,9 +42,26 @@ Upload .html/.zip → validate → extract in memory → upload files to Cloudin
 - `/projects`: every published project, with search, filters, grid and list views, and a details drawer. Projects can be renamed, redeployed with new files (the URL stays the same) or deleted, which also removes their Cloudinary files.
 - `/<slug>`: the public pages. These need no login. The older `/p/<slug>` form still works.
 
+## Accounts and locked projects
+
+- **Admin** (`ADMIN_*`): sees and manages every *unlocked* project. Locked projects are invisible to it everywhere: lists, details, rename, redeploy, assets and delete all return 404.
+- **Private** (`PRIVATE_*`, optional): sees everything. On the Projects page, a **Locked** button next to "New deployment" opens the locked vault, and any project can be locked or unlocked from its card. Projects deployed from this login are locked by default (the "Lock this project" switch on the deploy page).
+- Public links of locked projects keep working. Locking only hides them from the admin dashboard.
+
+## Performance
+
+- The Projects page renders its first list on the server (streamed with a skeleton), so there is no client-side fetch waterfall.
+- Card previews load lazily, at most two at a time.
+- Public pages: project data is cached in memory (15 s, cleared on every change), and Cloudinary file bodies are cached by their immutable URL. Responses carry ETags, so repeat visits get `304 Not Modified`. Concurrent lookups for the same page share one database query.
+- `instrumentation.ts` opens the MongoDB connection when the server starts.
+
 ## Security
 
-- The dashboard, the projects page and every `/api/projects*` route need an admin session. That is a signed, httpOnly cookie that lasts 7 days. `proxy.ts` redirects pages to `/login`, and each API route checks the session itself. Failed logins are rate-limited.
+- Every response from a published page carries the CSP sandbox, not just HTML, so uploaded `.xml`/`.svg` files opened directly cannot run script on this origin.
+- Admin pages send `X-Frame-Options: DENY`, `frame-ancestors 'none'`, HSTS, nosniff, Referrer-Policy, Permissions-Policy and `X-Robots-Tag: noindex`.
+- Login: the request body is capped at 4 KB, and failures are rate-limited per IP, per username and globally. The post-login redirect only accepts same-site paths. The session cookie is `Secure` behind HTTPS proxies too.
+- Uploads must declare `Content-Length`, so size limits are enforced before buffering.
+- The dashboard, the projects page and every `/api/projects*` route need a session. That is a signed, httpOnly cookie that lasts 7 days. `proxy.ts` redirects pages to `/login`, and each API route checks the session itself. Failed logins are rate-limited.
 
 - Allow-listed file types, content sniffing (magic bytes) and size limits (see `lib/config.ts`).
 - ZIP entries with absolute paths or `..` are rejected. Nothing is written to the server filesystem.

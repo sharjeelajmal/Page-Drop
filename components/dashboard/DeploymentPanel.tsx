@@ -1,5 +1,7 @@
 "use client";
 
+import { Lock, Rocket } from "lucide-react";
+
 import { LivePreview } from "@/components/dashboard/LivePreview";
 import { Badge } from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -38,11 +40,23 @@ export function DeploymentPanel({ project, onNewDeployment }: DeploymentPanelPro
     <Panel
       title="Deployment"
       description={deployedAt ? `Deployed ${deployedAt}` : "Published"}
-      icon={<GlobeIcon className="h-[18px] w-[18px]" />}
+      icon={<Rocket />}
+      iconTone="emerald"
       meta={
-        <Badge tone="success" dot>
-          Ready
-        </Badge>
+        <span className="flex items-center gap-1.5">
+          <Badge tone="success" dot>
+            Ready
+          </Badge>
+          {project.locked && (
+            <span
+              title="Locked — hidden from the admin account"
+              className="inline-flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-300"
+            >
+              <Lock className="h-3 w-3" />
+              Locked
+            </span>
+          )}
+        </span>
       }
       action={
         <Button variant="secondary" size="sm" onClick={onNewDeployment}>

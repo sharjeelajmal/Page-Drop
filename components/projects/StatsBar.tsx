@@ -1,11 +1,15 @@
 "use client";
 
+import { Activity, Files, HardDrive, Images } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { DatabaseIcon, FileCodeIcon, GlobeIcon, ImageIcon } from "@/components/ui/icons";
+import { IconTile } from "@/components/ui/IconTile";
+import { Tilt } from "@/components/ui/Tilt";
 import { useTweenedNumber } from "@/hooks/useTweenedNumber";
 import { formatBytes } from "@/lib/config";
 import type { ProjectSummaryDTO } from "@/types/project";
+
+type Tone = "brand" | "sky" | "violet" | "emerald";
 
 export function StatsBar({ projects }: { projects: ProjectSummaryDTO[] }) {
   const live = projects.filter((p) => p.status === "ready").length;
@@ -14,17 +18,18 @@ export function StatsBar({ projects }: { projects: ProjectSummaryDTO[] }) {
   const assets = projects.reduce((sum, p) => sum + p.assetCount, 0);
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <Stat index={0} icon={<GlobeIcon className="h-4 w-4" />} label="Projects" value={projects.length} detail={`${live} live`} />
-      <Stat index={1} icon={<FileCodeIcon className="h-4 w-4" />} label="Published files" value={files} />
-      <Stat index={2} icon={<DatabaseIcon className="h-4 w-4" />} label="Storage used" value={bytes} format={formatBytes} />
-      <Stat index={3} icon={<ImageIcon className="h-4 w-4" />} label="Uploaded assets" value={assets} />
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <Stat index={0} tone="brand" icon={<Activity />} label="Projects" value={projects.length} detail={`${live} live`} />
+      <Stat index={1} tone="sky" icon={<Files />} label="Published files" value={files} />
+      <Stat index={2} tone="violet" icon={<HardDrive />} label="Storage used" value={bytes} format={formatBytes} />
+      <Stat index={3} tone="emerald" icon={<Images />} label="Uploaded assets" value={assets} />
     </div>
   );
 }
 
 function Stat({
   index,
+  tone,
   icon,
   label,
   value,
@@ -32,6 +37,7 @@ function Stat({
   format = (n) => Math.round(n).toLocaleString(),
 }: {
   index: number;
+  tone: Tone;
   icon: ReactNode;
   label: string;
   value: number;
@@ -40,20 +46,23 @@ function Stat({
 }) {
   const tweened = useTweenedNumber(value, 900, 0);
   return (
-    <div
-      className="group relative animate-slide-up overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-card transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-primary/30"
-      style={{ animationDelay: `${index * 60}ms` }}
-    >
-      <div
-        aria-hidden="true"
-        className="absolute -top-10 -right-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl transition-opacity duration-300 group-hover:opacity-100 sm:opacity-60"
-      />
-      <div className="relative flex items-center justify-between">
-        <span className="text-xs font-medium text-fg-subtle">{label}</span>
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-soft text-primary">{icon}</span>
-      </div>
-      <p className="relative mt-3 text-2xl font-semibold tracking-tight text-fg tabular-nums">{format(tweened)}</p>
-      {detail && <p className="relative mt-0.5 text-xs text-fg-subtle">{detail}</p>}
+    <div className="animate-slide-up" style={{ animationDelay: `${index * 70}ms` }}>
+      <Tilt max={8} className="edge glass depth-2 relative h-full overflow-hidden rounded-[20px] border border-border/60 p-5">
+        <div
+          aria-hidden="true"
+          className="absolute -top-12 -right-12 h-32 w-32 rounded-full bg-primary/15 blur-2xl"
+        />
+        <div className="relative flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-fg-subtle">{label}</p>
+            <p className="mt-2 text-[28px] leading-none font-bold tracking-tight text-fg tabular-nums">{format(tweened)}</p>
+            {detail && <p className="mt-1.5 text-xs text-fg-subtle">{detail}</p>}
+          </div>
+          <IconTile tone={tone} size="md">
+            {icon}
+          </IconTile>
+        </div>
+      </Tilt>
     </div>
   );
 }

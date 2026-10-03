@@ -3,24 +3,26 @@ import "server-only";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
+import { SESSION_COOKIE, readSessionToken, type Session } from "@/lib/auth/session";
 import { AppError } from "@/lib/errors";
 
-/** For Server Components and pages. */
-export async function isAuthenticated(): Promise<boolean> {
+export type { Session, Role } from "@/lib/auth/session";
+
+/** Current session for Server Components and pages (null when signed out). */
+export async function getSession(): Promise<Session | null> {
   const store = await cookies();
-  return verifySessionToken(store.get(SESSION_COOKIE)?.value);
+  return readSessionToken(store.get(SESSION_COOKIE)?.value);
 }
 
-/** For Route Handlers: throws 401 when the request has no valid session. */
-export function requireAdmin(request: NextRequest): void {
-  if (!verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value)) {
-    throw new AppError(401, "unauthorized", "Please sign in to continue.");
-  }
+export async function isAuthenticated(): Promise<boolean> {
+  return (await getSession()) !== null;
 }
 
-/** Only allow same-site relative paths as post-login destinations. */
-export function safeNextPath(value: string | null | undefined): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return "/";
-  return value;
+/** For Route Handlers: returns the session or throws 401. */
+export function requireSession(request: NextRequest): Session {
+  const session = readSessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) throw new AppError(401, "unauthorized", "Please sign in to continue.");
+  return session;
 }
+
+export { safeNextPath } from "@/lib/auth/next-path";

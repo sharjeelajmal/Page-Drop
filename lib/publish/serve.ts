@@ -1,11 +1,12 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { LEGACY_ROUTE_PREFIX } from "@/lib/config";
-import { connectToDatabase } from "@/lib/db/mongodb";
 import { getFileType } from "@/lib/files/mime";
 import { dirname, normalizeRequestPath } from "@/lib/files/paths";
 import { isValidSlug } from "@/lib/ids";
-import { Project, type AssetRecord } from "@/lib/models/Project";
+import { fetchImmutable, getPublishedSite } from "@/lib/publish/cache";
 import { rewriteCss, rewriteHtml } from "@/lib/publish/rewrite";
 import { PublishedSite, type SiteFile } from "@/lib/publish/site";
 import { publicBasePath } from "@/lib/urls";
@@ -31,11 +32,7 @@ export async function servePublishedPath(
   const path = normalizeRequestPath(segments);
   if (path === null) return messagePage(400, "Bad request", "Invalid path.");
 
-  await connectToDatabase();
-  const project = await Project.findOne(
-    { slug },
-    { slug: 1, status: 1, entryFile: 1, files: 1, assets: 1 },
-  ).lean();
+  const project = await getPublishedSite(slug);
 
   if (!project) return messagePage(404, "Page not found", "This page does not exist or was removed.");
   if (project.status === "processing") {
@@ -53,7 +50,7 @@ export async function servePublishedPath(
     basePath: usesLegacyUrl ? `${legacyPrefix}/` : publicBasePath(project.slug),
     entryFile: project.entryFile,
     files: project.files,
-    assets: project.assets as AssetRecord[],
+    assets: project.assets,
   });
 
   const resolution = site.resolveRequest(path, pathname.endsWith("/"));
@@ -63,13 +60,17 @@ export async function servePublishedPath(
     case "not-found":
       return messagePage(404, "Not found", "The requested file is not part of this page.");
     case "file":
-      return serveFile(request, site, resolution.file, resolution.status);
+      return serveFile(request, site, project.version, resolution.file, resolution.status);
   }
 }
+
+/** Files up to this size are served from the in-memory cache instead of streamed. */
+const BUFFERED_MAX_BYTES = 2 * 1024 * 1024;
 
 async function serveFile(
   request: Request,
   site: PublishedSite,
+  siteVersion: string,
   file: SiteFile,
   status: number,
 ): Promise<Response> {
@@ -77,39 +78,56 @@ async function serveFile(
   if (file.resourceType === "image") return redirect(file.cloudinaryUrl, 302);
 
   const kind = getFileType(file.path)?.kind;
+  const rewritten = kind === "html" || kind === "css";
+  const isDocument = kind === "html";
 
-  if (kind === "html" || kind === "css") {
-    // Versioned Cloudinary URLs are immutable, so the fetch can be cached.
-    const upstream = await fetch(file.cloudinaryUrl, { cache: "force-cache" });
-    if (!upstream.ok) return upstreamError(upstream.status);
+  // HTML/CSS output also depends on assets (rewritten URLs), so their ETag
+  // includes the site version; other files only change with their own URL.
+  const etag = `"${createHash("sha1")
+    .update(rewritten ? `${file.cloudinaryUrl}|${siteVersion}|${site.basePath}` : file.cloudinaryUrl)
+    .digest("base64url")}"`;
+  if (status === 200 && request.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: baseHeaders(file, etag, isDocument) });
+  }
 
-    const bytes = new Uint8Array(await upstream.arrayBuffer());
+  if (rewritten) {
+    const upstream = await fetchImmutable(file.cloudinaryUrl);
+    if ("status" in upstream) return upstreamError(upstream.status);
+
+    const bytes = upstream.data;
     const text = decodeUtf8(bytes);
     const fromDir = dirname(file.path);
     const rewrite = (ref: string) => site.rewriteReference(ref, fromDir);
 
-    const headers = baseHeaders(file);
+    const headers = baseHeaders(file, etag, isDocument);
     // Pages that aren't UTF-8 are served byte-for-byte so their own <meta charset> applies.
-    let body: BodyInit = bytes;
+    let body: BodyInit = bytes as Uint8Array<ArrayBuffer>;
     if (text !== null) {
-      body = kind === "html" ? rewriteHtml(text, rewrite) : rewriteCss(text, rewrite);
+      body = isDocument ? rewriteHtml(text, rewrite) : rewriteCss(text, rewrite);
     } else {
       headers.set("Content-Type", file.contentType.replace(/;\s*charset=utf-8/i, ""));
     }
-    if (kind === "html") applyDocumentHeaders(headers);
     return new Response(body, { status, headers });
   }
 
-  // Everything else is streamed through unchanged, with Range support for media.
   const range = request.headers.get("range");
+  if (!range && file.bytes <= BUFFERED_MAX_BYTES) {
+    const upstream = await fetchImmutable(file.cloudinaryUrl);
+    if ("status" in upstream) return upstreamError(upstream.status);
+    const headers = baseHeaders(file, etag, false);
+    headers.set("Content-Length", String(upstream.data.byteLength));
+    return new Response(upstream.data as Uint8Array<ArrayBuffer>, { status, headers });
+  }
+
+  // Large files and media ranges are streamed through unchanged.
   const upstream = await fetch(file.cloudinaryUrl, {
     cache: "no-store",
     headers: range ? { range } : undefined,
   });
   if (!upstream.ok) return upstreamError(upstream.status);
 
-  const headers = baseHeaders(file);
-  for (const name of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+  const headers = baseHeaders(file, etag, false);
+  for (const name of ["content-length", "content-range", "accept-ranges"]) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -119,28 +137,33 @@ async function serveFile(
   });
 }
 
-function baseHeaders(file: SiteFile): Headers {
+/**
+ * Every response from a published project carries the CSP sandbox, not just
+ * HTML: an uploaded .xml/.svg (or any file opened directly) would otherwise
+ * run script on this origin. With the sandbox and no allow-same-origin, page
+ * scripts run in an opaque origin and cannot read this app's cookies or call
+ * its APIs. Browsers ignore this header on subresources (CSS, JS, fonts), so
+ * it only takes effect when a file is opened as a document.
+ */
+const SANDBOX_POLICY =
+  "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-orientation-lock";
+
+function baseHeaders(file: SiteFile, etag: string, isDocument: boolean): Headers {
   return new Headers({
     "Content-Type": file.contentType,
-    "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+    // Documents revalidate every time (cheap 304s) so redeploys show at once;
+    // other files can be reused briefly and refreshed in the background.
+    "Cache-Control": isDocument
+      ? "public, max-age=0, must-revalidate"
+      : "public, max-age=300, stale-while-revalidate=86400",
+    ETag: etag,
     "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": SANDBOX_POLICY,
+    "Referrer-Policy": "strict-origin-when-cross-origin",
     // Sandboxed documents have an opaque origin, so module scripts, fonts
     // and fetch() calls to the page's own files are cross-origin requests.
     "Access-Control-Allow-Origin": "*",
   });
-}
-
-/**
- * Isolates uploaded documents from the dashboard: with a CSP sandbox and no
- * allow-same-origin, page scripts run in an opaque origin and cannot read
- * this app's cookies/storage or call its APIs with credentials.
- */
-function applyDocumentHeaders(headers: Headers) {
-  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  headers.set(
-    "Content-Security-Policy",
-    "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-orientation-lock",
-  );
 }
 
 function decodeUtf8(bytes: Uint8Array): string | null {
@@ -154,7 +177,7 @@ function decodeUtf8(bytes: Uint8Array): string | null {
 function redirect(location: string, status: number): Response {
   return new Response(null, {
     status,
-    headers: { Location: location, "Cache-Control": "public, max-age=60" },
+    headers: { Location: location, "Cache-Control": "public, max-age=60", "Content-Security-Policy": SANDBOX_POLICY },
   });
 }
 
@@ -183,6 +206,7 @@ function messagePage(status: number, title: string, message: string): Response {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": SANDBOX_POLICY,
     },
   });
 }

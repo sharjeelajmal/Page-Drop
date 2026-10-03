@@ -43,6 +43,7 @@ export function serializeProject(project: ProjectRecord & Timestamps, requestOri
     warnings: [...(project.warnings ?? [])],
     error: project.error ?? undefined,
     assets: (project.assets as AssetRecord[]).map(serializeAsset),
+    locked: project.locked === true,
     files: project.files.map((f) => ({
       path: f.path,
       bytes: f.bytes,

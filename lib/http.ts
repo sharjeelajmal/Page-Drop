@@ -65,7 +65,12 @@ export async function readUploadedFile(
   if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
     throw badRequest("invalid_request", "Expected a multipart/form-data upload.");
   }
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  // Require a declared size so the limit can be enforced before buffering
+  // (browsers always send it for form uploads; chunked bodies are refused).
+  const contentLength = Number(request.headers.get("content-length"));
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    throw new AppError(411, "length_required", "Upload size is missing (Content-Length required).");
+  }
   // Allow some headroom for multipart boundaries and headers.
   if (contentLength > maxBytes + 64 * 1024) {
     throw payloadTooLarge("The uploaded file is too large.");
@@ -82,6 +87,49 @@ export async function readUploadedFile(
     throw badRequest("missing_file", "No file was uploaded, or the file is empty.");
   }
   return { file, form };
+}
+
+/**
+ * Reads a JSON body without ever buffering more than `maxBytes`, even when the
+ * client omits or lies about Content-Length. Returns null for invalid JSON.
+ */
+export async function readJsonBody(request: Request, maxBytes: number): Promise<unknown> {
+  if (Number(request.headers.get("content-length") ?? 0) > maxBytes) {
+    throw payloadTooLarge("Request body is too large.");
+  }
+  if (!request.body) return null;
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw payloadTooLarge("Request body is too large.");
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
+
+/** True when the visitor connected over HTTPS (directly or via a TLS-terminating proxy). */
+export function isHttpsRequest(request: NextRequest): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
+  return request.nextUrl.protocol === "https:" || forwarded === "https";
 }
 
 /** Origin used to build public URLs when no base URL env var is set. */

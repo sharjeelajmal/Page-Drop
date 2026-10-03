@@ -5,6 +5,33 @@ import { useEffect, useRef, useState } from "react";
 import { ProjectThumb } from "@/components/projects/ProjectThumb";
 import type { ProjectSummaryDTO } from "@/types/project";
 
+/**
+ * At most this many previews load at once. Each preview is a full page (often
+ * with CDN scripts), so loading them all together makes the whole projects
+ * page feel slow; queued previews start as earlier ones finish.
+ */
+const MAX_CONCURRENT_PREVIEWS = 2;
+const PREVIEW_SLOT_TIMEOUT_MS = 8000;
+let activePreviews = 0;
+const waitingPreviews: Array<() => void> = [];
+
+function acquirePreviewSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      activePreviews++;
+      let released = false;
+      resolve(() => {
+        if (released) return;
+        released = true;
+        activePreviews--;
+        waitingPreviews.shift()?.();
+      });
+    };
+    if (activePreviews < MAX_CONCURRENT_PREVIEWS) grant();
+    else waitingPreviews.push(grant);
+  });
+}
+
 /** Desktop viewport the page is rendered at before being scaled down. */
 const VIEWPORT_WIDTH = 1280;
 const VIEWPORT_HEIGHT = 720;
@@ -24,6 +51,8 @@ export function PagePreview({ project, className = "" }: { project: ProjectSumma
   const [visible, setVisible] = useState(false);
   const [width, setWidth] = useState(0);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [slotGranted, setSlotGranted] = useState(false);
+  const releaseRef = useRef<(() => void) | null>(null);
 
   // Reload the thumbnail after a redeploy.
   const frameKey = `${project.publicUrl}#${project.updatedAt}`;
@@ -53,6 +82,25 @@ export function PagePreview({ project, className = "" }: { project: ProjectSumma
     };
   }, []);
 
+  // Wait for a free loading slot once the card is visible.
+  useEffect(() => {
+    if (!visible || project.status !== "ready") return;
+    let cancelled = false;
+    let timer = 0;
+    acquirePreviewSlot().then((release) => {
+      if (cancelled) return release();
+      releaseRef.current = release;
+      setSlotGranted(true);
+      // Never let one slow page hold the queue.
+      timer = window.setTimeout(release, PREVIEW_SLOT_TIMEOUT_MS);
+    });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      releaseRef.current?.();
+    };
+  }, [visible, project.status]);
+
   if (project.status !== "ready") {
     return <ProjectThumb name={project.name} type={project.type} thumbnailUrl={project.thumbnailUrl} className={className} />;
   }
@@ -74,7 +122,7 @@ export function PagePreview({ project, className = "" }: { project: ProjectSumma
         </div>
       </div>
 
-      {visible && width > 0 && (
+      {slotGranted && width > 0 && (
         <iframe
           key={frameKey}
           src={project.publicUrl}
@@ -85,7 +133,10 @@ export function PagePreview({ project, className = "" }: { project: ProjectSumma
           scrolling="no"
           tabIndex={-1}
           aria-hidden="true"
-          onLoad={() => setLoadedKey(frameKey)}
+          onLoad={() => {
+            setLoadedKey(frameKey);
+            releaseRef.current?.();
+          }}
           className={`pointer-events-none absolute top-0 left-0 origin-top-left border-0 bg-white transition-opacity duration-500 ${
             loaded ? "opacity-100" : "opacity-0"
           }`}

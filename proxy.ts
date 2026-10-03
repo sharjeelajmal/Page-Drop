@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { safeNextPath } from "@/lib/auth/next-path";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 
 /**
@@ -12,7 +13,9 @@ export default function proxy(request: NextRequest) {
   const authenticated = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (pathname === "/login") {
-    return authenticated ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
+    if (!authenticated) return NextResponse.next();
+    const next = safeNextPath(request.nextUrl.searchParams.get("next"));
+    return NextResponse.redirect(new URL(next, request.url));
   }
 
   if (!authenticated) {
