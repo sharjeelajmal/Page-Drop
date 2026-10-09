@@ -89,3 +89,5 @@ lib/projects/                        Upload preparation, service layer, serializ
 lib/publish/                         Path resolution, reference rewriting, response building
 lib/models/Project.ts                Mongoose schema
 ```
+
+Maintained with Zumora.
