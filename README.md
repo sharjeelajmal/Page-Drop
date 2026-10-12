@@ -103,3 +103,5 @@ lib/analytics/                       Visit tracking, user-agent parsing, reports
 components/analytics/                Analytics tab UI
 lib/models/Project.ts, Visit.ts      Mongoose schemas
 ```
+
+Tested from the Zumora phone app.
