@@ -6,6 +6,7 @@ import { LEGACY_ROUTE_PREFIX } from "@/lib/config";
 import { getFileType } from "@/lib/files/mime";
 import { dirname, normalizeRequestPath } from "@/lib/files/paths";
 import { isValidSlug } from "@/lib/ids";
+import { trackPageView } from "@/lib/analytics/track";
 import { fetchImmutable, getPublishedSite } from "@/lib/publish/cache";
 import { rewriteCss, rewriteHtml } from "@/lib/publish/rewrite";
 import { PublishedSite, type SiteFile } from "@/lib/publish/site";
@@ -54,6 +55,10 @@ export async function servePublishedPath(
   });
 
   const resolution = site.resolveRequest(path, pathname.endsWith("/"));
+  // Count real page loads (HTML documents), not their CSS/JS/images.
+  if (resolution.type === "file" && resolution.status === 200 && getFileType(resolution.file.path)?.kind === "html") {
+    trackPageView(request, project, resolution.file.path === project.entryFile ? "" : resolution.file.path);
+  }
   switch (resolution.type) {
     case "redirect":
       return redirect(resolution.location, resolution.status);

@@ -6,8 +6,10 @@ import type { ReactNode } from "react";
 import { CopyButton } from "@/components/ui/CopyButton";
 import type { ProjectSummaryDTO } from "@/types/project";
 
+export type DrawerTab = "overview" | "analytics";
+
 export interface ProjectHandlers {
-  onView: (project: ProjectSummaryDTO) => void;
+  onView: (project: ProjectSummaryDTO, tab?: DrawerTab) => void;
   onRename: (project: ProjectSummaryDTO) => void;
   onRedeploy: (project: ProjectSummaryDTO) => void;
   onDelete: (project: ProjectSummaryDTO) => void;

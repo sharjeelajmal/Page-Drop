@@ -44,6 +44,8 @@ export interface ProjectDTO {
   assets: AssetDTO[];
   files: ProjectFileDTO[];
   locked: boolean;
+  viewCount: number;
+  lastVisitedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,11 +65,63 @@ export interface ProjectSummaryDTO {
   totalBytes: number;
   thumbnailUrl?: string;
   locked: boolean;
+  viewCount: number;
+  lastVisitedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export type ViewerRole = "admin" | "private";
+
+// ---------------------------------------------------------------------------
+// Visitor analytics
+// ---------------------------------------------------------------------------
+
+export type VisitDeviceType = "desktop" | "mobile" | "tablet" | "bot";
+
+/** One visitor (a browser/device) and their visits in the selected range. */
+export interface VisitorDTO {
+  views: number;
+  firstAt: string;
+  lastAt: string;
+  deviceType: VisitDeviceType;
+  os: string;
+  browser: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  /** Referring site of their first visit ("" = direct / app). */
+  referrer: string;
+}
+
+export interface BreakdownItem {
+  label: string;
+  count: number;
+}
+
+export interface ProjectAnalyticsDTO {
+  days: number;
+  totals: {
+    views: number;
+    uniqueVisitors: number;
+    linkPreviews: number;
+    allTimeViews: number;
+    lastVisitAt?: string;
+  };
+  /** One entry per day (oldest first), in UTC. */
+  daily: { date: string; views: number }[];
+  devices: BreakdownItem[];
+  browsers: BreakdownItem[];
+  os: BreakdownItem[];
+  countries: BreakdownItem[];
+  /** Labels are "City|CC". */
+  cities: BreakdownItem[];
+  referrers: BreakdownItem[];
+  /** Link-preview fetchers / crawlers (WhatsApp, Slack…). Not counted as views. */
+  bots: BreakdownItem[];
+  /** Most recent visitors first (at most 100). */
+  visitors: VisitorDTO[];
+}
 
 export interface ApiErrorBody {
   error: { code: string; message: string };

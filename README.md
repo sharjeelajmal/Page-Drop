@@ -48,6 +48,18 @@ Upload .html/.zip → validate → extract in memory → upload files to Cloudin
 - **Private** (`PRIVATE_*`, optional): sees everything. On the Projects page, a **Locked** button next to "New deployment" opens the locked vault, and any project can be locked or unlocked from its card. Projects deployed from this login are locked by default (the "Lock this project" switch on the deploy page).
 - Public links of locked projects keep working. Locking only hides them from the admin dashboard.
 
+## Visitor analytics
+
+Open a project on the Projects page and switch to the **Analytics** tab (or click the "Opened N×" / "Not opened yet" pill on its card).
+
+- **What you see:** views and the number of people (unique visitors) per day, device type (desktop, mobile or tablet), browser, OS, where the visit came from (WhatsApp, Instagram, Google…), and cities and countries. A **Visitors** list shows the last 100 visitors, one row each, with their location, device, how many times they opened the page and when.
+- **One link for everyone:** share the normal project link. No per-person links are needed.
+- **Not counted:** your own visits while signed in, the dashboard's preview iframes, prefetches, assets such as CSS and images, and reloads by the same visitor within 30 seconds.
+- **Link previews:** WhatsApp, Slack and Telegram fetch a link to build its preview card. These requests, and other bots and headless browsers, are listed separately under "Link previews" and are not counted as views. A link preview only means the link was *sent*, not that it was opened.
+- **Privacy:** IP addresses are not stored. A visitor is an anonymous, salted hash of IP and user agent, so the same person on another network or browser counts as a new visitor. Visit records expire after 400 days and are deleted together with their project.
+- **Country, region and city:** these come from your host's geo headers (Vercel, Cloudflare or CloudFront). Vercel sends them automatically. On Cloudflare, country is on by default; for city and region, enable the "Add visitor location headers" managed transform. On localhost or a plain VPS they stay empty.
+- Recording runs after the response is sent, so it adds no latency, and it never changes the project's `updatedAt` or the page's ETag.
+
 ## Performance
 
 - The Projects page renders its first list on the server (streamed with a skeleton), so there is no client-side fetch waterfall.
@@ -80,12 +92,14 @@ Upload .html/.zip → validate → extract in memory → upload files to Cloudin
 proxy.ts                             Redirects signed-out visitors to /login
 app/login, app/projects              Sign-in page, projects management page
 app/page.tsx                         Dashboard
-app/api/projects/…                   Upload project, get project, upload/delete assets
+app/api/projects/…                   Upload project, get project, upload/delete assets, analytics
 app/p/[slug]/[[...path]]/route.ts    Public pages (reached via /<slug>)
 components/dashboard, components/ui  UI components
 hooks/useProjectUpload.ts            Project upload state
 lib/files/                           Path safety, MIME allow-list, signatures, ZIP extraction
 lib/projects/                        Upload preparation, service layer, serialization
 lib/publish/                         Path resolution, reference rewriting, response building
-lib/models/Project.ts                Mongoose schema
+lib/analytics/                       Visit tracking, user-agent parsing, reports
+components/analytics/                Analytics tab UI
+lib/models/Project.ts, Visit.ts      Mongoose schemas
 ```

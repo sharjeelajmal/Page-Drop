@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, Link2, Lock } from "lucide-react";
+import { BarChart3, Eye, Link2, Lock } from "lucide-react";
 
 import { PagePreview } from "@/components/projects/PagePreview";
 import { ProjectActions, type ProjectHandlers } from "@/components/projects/ProjectActions";
@@ -100,7 +100,10 @@ export function ProjectCard({ project, index, now, handlers }: ProjectItemProps)
             <Link2 className="h-3 w-3 shrink-0" />
             <span className="truncate">{shortUrl}</span>
           </a>
-          <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
+          <div className="mt-3">
+            <ViewsPill project={project} now={now} onClick={() => handlers.onView(project, "analytics")} />
+          </div>
+          <p className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
             <span>{plural(project.fileCount, "file")}</span>
             <Dot />
             <span>{formatBytes(project.totalBytes)}</span>
@@ -165,8 +168,41 @@ export function ProjectRow({ project, index, now, handlers }: ProjectItemProps) 
         {formatBytes(project.totalBytes)}
       </span>
       <span className="hidden w-24 text-right text-xs text-fg-subtle sm:block">{formatRelative(project.updatedAt, now)}</span>
+      <div className="hidden w-44 justify-end md:flex">
+        <ViewsPill project={project} now={now} onClick={() => handlers.onView(project, "analytics")} />
+      </div>
       <ProjectActions project={project} handlers={handlers} />
     </li>
+  );
+}
+
+/** "Opened 12× · 2h ago" (or "Not opened yet"); opens the Analytics tab. */
+function ViewsPill({ project, now, onClick }: { project: ProjectSummaryDTO; now: number; onClick: () => void }) {
+  const opened = project.viewCount > 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Visitor analytics"
+      className="group/views inline-flex max-w-full items-center gap-1.5 rounded-full text-[11.5px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary-ring"
+    >
+      <span
+        className={`inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 transition-colors ${
+          opened
+            ? "border-success/30 bg-success-soft text-success group-hover/views:border-success/60"
+            : "border-border bg-surface-2 text-fg-subtle group-hover/views:text-fg"
+        }`}
+      >
+        <BarChart3 className="h-3 w-3 shrink-0" />
+        <span className="truncate tabular-nums">
+          {opened
+            ? `Opened ${project.viewCount.toLocaleString()}×${
+                project.lastVisitedAt ? ` · ${formatRelative(project.lastVisitedAt, now)}` : ""
+              }`
+            : "Not opened yet"}
+        </span>
+      </span>
+    </button>
   );
 }
 

@@ -1,8 +1,10 @@
 "use client";
 
+import { BarChart3, LayoutPanelTop } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import { AnalyticsPanel } from "@/components/analytics/AnalyticsPanel";
 import { LivePreview } from "@/components/dashboard/LivePreview";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { Button, ButtonLink, buttonClasses } from "@/components/ui/Button";
@@ -24,10 +26,12 @@ import { fetchProject } from "@/lib/client/projects";
 import { formatBytes } from "@/lib/config";
 import type { ProjectDTO, ProjectSummaryDTO } from "@/types/project";
 
-import type { ProjectHandlers } from "@/components/projects/ProjectActions";
+import type { DrawerTab, ProjectHandlers } from "@/components/projects/ProjectActions";
 
 interface ProjectDrawerProps {
   project: ProjectSummaryDTO | null;
+  /** Tab to open on (e.g. "analytics" from the card's views badge). */
+  initialTab?: DrawerTab;
   /** Bumped by the parent after a rename/redeploy so details are refetched. */
   version: number;
   onClose: () => void;
@@ -36,7 +40,7 @@ interface ProjectDrawerProps {
 
 type Details = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; project: ProjectDTO };
 
-export function ProjectDrawer({ project, version, onClose, handlers }: ProjectDrawerProps) {
+export function ProjectDrawer({ project, initialTab = "overview", version, onClose, handlers }: ProjectDrawerProps) {
   const [details, setDetails] = useState<{ key: string; value: Details } | null>(null);
   const key = project ? `${project.projectId}:${version}` : "";
 
@@ -62,56 +66,114 @@ export function ProjectDrawer({ project, version, onClose, handlers }: ProjectDr
       subtitle={project && <StatusBadge status={project.status} />}
     >
       {project && (
-        <div className="space-y-6">
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-bg-subtle p-1.5 pl-3.5">
-            <GlobeIcon className="h-4 w-4 shrink-0 text-primary" />
-            <a
-              href={project.publicUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-w-0 flex-1 truncate px-1.5 font-mono text-sm text-fg hover:text-primary"
-            >
-              {project.publicUrl}
-            </a>
-            <CopyButton value={project.publicUrl} label="Copy URL" />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <ButtonLink href={project.publicUrl} target="_blank" rel="noopener noreferrer" variant="primary" size="sm">
-              <ExternalIcon className="h-4 w-4" />
-              Open page
-            </ButtonLink>
-            <Button variant="secondary" size="sm" onClick={() => handlers.onRename(project)}>
-              <PencilIcon className="h-4 w-4" />
-              Rename
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => handlers.onRedeploy(project)}>
-              <RetryIcon className="h-4 w-4" />
-              Redeploy
-            </Button>
-            <Link href={`/?project=${project.projectId}`} className={buttonClasses("secondary", "sm")}>
-              <ImageIcon className="h-4 w-4" />
-              Manage assets
-            </Link>
-            <Button variant="danger" size="sm" onClick={() => handlers.onDelete(project)}>
-              <TrashIcon className="h-4 w-4" />
-              Delete
-            </Button>
-          </div>
-
-          <LivePreview key={key} url={project.publicUrl} />
-
-          {current.status === "loading" && <DetailsSkeleton />}
-          {current.status === "error" && (
-            <p className="flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
-              <AlertIcon className="h-4 w-4" />
-              {current.message}
-            </p>
-          )}
-          {current.status === "ready" && <ProjectDetails project={current.project} />}
-        </div>
+        // Keyed so the tab resets when another project (or tab) is opened.
+        <DrawerTabs key={`${project.projectId}:${initialTab}`} initialTab={initialTab}>
+          {(tab) =>
+            tab === "analytics" ? (
+              <AnalyticsPanel projectId={project.projectId} />
+            ) : (
+              <Overview project={project} previewKey={key} details={current} handlers={handlers} />
+            )
+          }
+        </DrawerTabs>
       )}
     </Drawer>
+  );
+}
+
+function Overview({
+  project,
+  previewKey,
+  details: current,
+  handlers,
+}: {
+  project: ProjectSummaryDTO;
+  previewKey: string;
+  details: Details;
+  handlers: ProjectDrawerProps["handlers"];
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-1 rounded-xl border border-border bg-bg-subtle p-1.5 pl-3.5">
+        <GlobeIcon className="h-4 w-4 shrink-0 text-primary" />
+        <a
+          href={project.publicUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 flex-1 truncate px-1.5 font-mono text-sm text-fg hover:text-primary"
+        >
+          {project.publicUrl}
+        </a>
+        <CopyButton value={project.publicUrl} label="Copy URL" />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <ButtonLink href={project.publicUrl} target="_blank" rel="noopener noreferrer" variant="primary" size="sm">
+          <ExternalIcon className="h-4 w-4" />
+          Open page
+        </ButtonLink>
+        <Button variant="secondary" size="sm" onClick={() => handlers.onRename(project)}>
+          <PencilIcon className="h-4 w-4" />
+          Rename
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => handlers.onRedeploy(project)}>
+          <RetryIcon className="h-4 w-4" />
+          Redeploy
+        </Button>
+        <Link href={`/?project=${project.projectId}`} className={buttonClasses("secondary", "sm")}>
+          <ImageIcon className="h-4 w-4" />
+          Manage assets
+        </Link>
+        <Button variant="danger" size="sm" onClick={() => handlers.onDelete(project)}>
+          <TrashIcon className="h-4 w-4" />
+          Delete
+        </Button>
+      </div>
+
+      <LivePreview key={previewKey} url={project.publicUrl} />
+
+      {current.status === "loading" && <DetailsSkeleton />}
+      {current.status === "error" && (
+        <p className="flex items-center gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
+          <AlertIcon className="h-4 w-4" />
+          {current.message}
+        </p>
+      )}
+      {current.status === "ready" && <ProjectDetails project={current.project} />}
+    </div>
+  );
+}
+
+const TABS: { id: DrawerTab; label: string; Icon: typeof BarChart3 }[] = [
+  { id: "overview", label: "Overview", Icon: LayoutPanelTop },
+  { id: "analytics", label: "Analytics", Icon: BarChart3 },
+];
+
+function DrawerTabs({ initialTab, children }: { initialTab: DrawerTab; children: (tab: DrawerTab) => ReactNode }) {
+  const [tab, setTab] = useState<DrawerTab>(initialTab);
+  return (
+    <div className="space-y-5">
+      <div role="tablist" aria-label="Project sections" className="flex gap-1 rounded-xl border border-border bg-bg-subtle p-1">
+        {TABS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[13px] font-medium whitespace-nowrap transition-all duration-200 sm:px-3 ${
+              tab === id ? "depth-1 bg-surface text-fg ring-1 ring-border" : "text-fg-subtle hover:text-fg"
+            }`}
+          >
+            <Icon className={`hidden h-4 w-4 min-[400px]:block ${tab === id ? "text-primary" : ""}`} />
+            {label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" key={tab} className="animate-fade-in">
+        {children(tab)}
+      </div>
+    </div>
   );
 }
 

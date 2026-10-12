@@ -17,6 +17,7 @@ import { EXTENSION_IMAGE_FORMAT, detectImageFormat } from "@/lib/files/signature
 import type { ExtractedFile } from "@/lib/files/zip";
 import { generateProjectId, generateSlug, isValidObjectId, isValidProjectId } from "@/lib/ids";
 import { Project, type AssetRecord, type ProjectFileRecord } from "@/lib/models/Project";
+import { Visit } from "@/lib/models/Visit";
 import { prepareProjectUpload, type PreparedProject } from "@/lib/projects/prepare";
 import { serializeAsset, serializeProject } from "@/lib/projects/serialize";
 import { invalidateSite } from "@/lib/publish/cache";
@@ -40,7 +41,7 @@ export interface Viewer {
  * and write below goes through it, so a locked project is a 404 for admin
  * even if its id is known.
  */
-function visibleTo(viewer: Viewer): Record<string, unknown> {
+export function visibleTo(viewer: Viewer): Record<string, unknown> {
   return viewer.role === "private" ? {} : { locked: { $ne: true } };
 }
 
@@ -124,6 +125,8 @@ export async function listProjects(
     assetThumb?: string;
     fileThumb?: string;
     locked?: boolean;
+    viewCount?: number;
+    lastVisitedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
   }>([
@@ -141,6 +144,8 @@ export async function listProjects(
         status: 1,
         totalBytes: 1,
         locked: 1,
+        viewCount: 1,
+        lastVisitedAt: 1,
         createdAt: 1,
         updatedAt: 1,
         fileCount: { $size: "$files" },
@@ -178,6 +183,8 @@ export async function listProjects(
     totalBytes: row.totalBytes ?? 0,
     thumbnailUrl: row.assetThumb ?? row.fileThumb ?? undefined,
     locked: row.locked === true,
+    viewCount: row.viewCount ?? 0,
+    lastVisitedAt: row.lastVisitedAt ? new Date(row.lastVisitedAt).toISOString() : undefined,
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
   }));
@@ -226,6 +233,7 @@ export async function deleteProject(projectId: string, viewer: Viewer): Promise<
   if (!project) throw projectNotFound();
   await deleteFolder(projectFolder(projectId));
   await Project.deleteOne({ projectId });
+  await Visit.deleteMany({ projectId });
   invalidateSite(project.slug);
 }
 

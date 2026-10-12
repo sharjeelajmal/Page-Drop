@@ -1,5 +1,5 @@
 import { apiRequest, uploadWithProgress } from "@/lib/client/api";
-import type { ProjectDTO, ProjectSummaryDTO } from "@/types/project";
+import type { ProjectAnalyticsDTO, ProjectDTO, ProjectSummaryDTO } from "@/types/project";
 
 /** Typed client for the admin projects API. */
 
@@ -52,4 +52,12 @@ export async function redeployProject(
     onProgress,
   );
   return project;
+}
+
+export async function fetchAnalytics(projectId: string, days = 30): Promise<ProjectAnalyticsDTO> {
+  const { analytics } = await apiRequest<{ analytics: ProjectAnalyticsDTO }>(
+    `${projectUrl(projectId)}/analytics?days=${days}`,
+    { cache: "no-store" },
+  );
+  return analytics;
 }

@@ -28,6 +28,7 @@ export function serializeAsset(asset: AssetRecord): AssetDTO {
  * dashboard, so projects created on localhost show the right link once live.
  */
 export function serializeProject(project: ProjectRecord & Timestamps, requestOrigin?: string): ProjectDTO {
+  const publicUrl = requestOrigin ? buildPublicUrl(project.slug, requestOrigin) : project.publicUrl;
   return {
     projectId: project.projectId,
     slug: project.slug,
@@ -36,7 +37,7 @@ export function serializeProject(project: ProjectRecord & Timestamps, requestOri
     type: project.type,
     status: project.status,
     entryFile: project.entryFile,
-    publicUrl: requestOrigin ? buildPublicUrl(project.slug, requestOrigin) : project.publicUrl,
+    publicUrl,
     fileCount: project.files.length,
     imageCount: project.files.filter((f) => f.resourceType === "image").length,
     totalBytes: project.totalBytes ?? 0,
@@ -44,6 +45,8 @@ export function serializeProject(project: ProjectRecord & Timestamps, requestOri
     error: project.error ?? undefined,
     assets: (project.assets as AssetRecord[]).map(serializeAsset),
     locked: project.locked === true,
+    viewCount: project.viewCount ?? 0,
+    lastVisitedAt: project.lastVisitedAt ? iso(project.lastVisitedAt) : undefined,
     files: project.files.map((f) => ({
       path: f.path,
       bytes: f.bytes,

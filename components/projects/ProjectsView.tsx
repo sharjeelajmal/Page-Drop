@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ProjectCard, ProjectRow } from "@/components/projects/ProjectCard";
 import { DeleteDialog, RedeployDialog, RenameDialog } from "@/components/projects/ProjectDialogs";
 import { ProjectDrawer } from "@/components/projects/ProjectDrawer";
-import type { ProjectHandlers } from "@/components/projects/ProjectActions";
+import type { DrawerTab, ProjectHandlers } from "@/components/projects/ProjectActions";
 import { StatsBar } from "@/components/projects/StatsBar";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { AlertIcon } from "@/components/ui/icons";
@@ -75,6 +75,7 @@ export function ProjectsView({ role, initialProjects, initialError }: ProjectsVi
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [viewing, setViewing] = useState<ProjectSummaryDTO | null>(null);
+  const [viewTab, setViewTab] = useState<DrawerTab>("overview");
   const [viewVersion, setViewVersion] = useState(0);
   const [renaming, setRenaming] = useState<ProjectSummaryDTO | null>(null);
   const [redeploying, setRedeploying] = useState<ProjectSummaryDTO | null>(null);
@@ -179,7 +180,10 @@ export function ProjectsView({ role, initialProjects, initialError }: ProjectsVi
   };
 
   const handlers: ProjectHandlers = {
-    onView: setViewing,
+    onView: (project, tab) => {
+      setViewTab(tab ?? "overview");
+      setViewing(project);
+    },
     onRename: setRenaming,
     onRedeploy: setRedeploying,
     onDelete: setDeleting,
@@ -347,7 +351,13 @@ export function ProjectsView({ role, initialProjects, initialError }: ProjectsVi
         </div>
       )}
 
-      <ProjectDrawer project={viewing} version={viewVersion} onClose={closeViewing} handlers={handlers} />
+      <ProjectDrawer
+        project={viewing}
+        initialTab={viewTab}
+        version={viewVersion}
+        onClose={closeViewing}
+        handlers={handlers}
+      />
       <RenameDialog project={renaming} onClose={closeRenaming} onRenamed={replace} />
       <RedeployDialog project={redeploying} onClose={closeRedeploying} onRedeployed={replace} />
       <DeleteDialog

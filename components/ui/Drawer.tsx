@@ -44,7 +44,7 @@ export function Drawer({ open, onClose, title, subtitle, actions, children }: Dr
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-surface shadow-elevated ${
+        className={`absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-border bg-surface shadow-elevated ${
           closing ? "animate-slide-out-right" : "animate-slide-in-right"
         }`}
       >

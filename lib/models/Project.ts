@@ -59,6 +59,9 @@ const projectSchema = new Schema(
     /** Locked projects are only visible to the private account, never to admin. */
     locked: { type: Boolean, default: false },
     createdBy: { type: String, enum: ["admin", "private"], default: "admin" },
+    /** Human page views (bots and the owner's own visits excluded). */
+    viewCount: { type: Number, default: 0 },
+    lastVisitedAt: Date,
     warnings: { type: [String], default: [] },
     error: String,
   },

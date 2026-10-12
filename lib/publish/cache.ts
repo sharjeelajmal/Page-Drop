@@ -15,6 +15,7 @@ import { Project, type AssetRecord, type ProjectFileRecord } from "@/lib/models/
  */
 
 export interface CachedSite {
+  projectId: string;
   slug: string;
   status: "processing" | "ready" | "failed";
   entryFile: string;
@@ -41,10 +42,11 @@ export async function getPublishedSite(slug: string): Promise<CachedSite | null>
     await connectToDatabase();
     const project = await Project.findOne(
       { slug },
-      { slug: 1, status: 1, entryFile: 1, files: 1, assets: 1, updatedAt: 1, revision: 1 },
+      { projectId: 1, slug: 1, status: 1, entryFile: 1, files: 1, assets: 1, updatedAt: 1, revision: 1 },
     ).lean();
     const site: CachedSite | null = project
       ? {
+          projectId: project.projectId,
           slug: project.slug,
           status: project.status,
           entryFile: project.entryFile,
